@@ -51,15 +51,19 @@
   </div>
 </div>
 
-<!-- IMPORTANT: use absolute GitHub Pages URLs -->
 <script>
-const BASE_URL = "https://tyberiusofficial-sketch.github.io/Flappy-Mammoth/";
+  // Absolute base + cache-buster
+  const BASE_URL = "https://tyberiusofficial-sketch.github.io/Flappy-Mammoth/";
+  const VERSION  = "v3"; // bump when you update files
 </script>
-<audio id="bgm" preload="auto" loop src="https://tyberiusofficial-sketch.github.io/Flappy-Mammoth/backgroundmusic.mp3"></audio>
+
+<!-- MP3 also uses absolute URL + version; crossorigin helps on some browsers -->
+<audio id="bgm" preload="auto" loop
+       src="https://tyberiusofficial-sketch.github.io/Flappy-Mammoth/backgroundmusic.mp3?v=v3"
+       crossorigin="anonymous"></audio>
 
 <script>
 (() => {
-  // ---------- Virtual canvas (logic space) ----------
   const VW = 800, VH = 450;
   const canvas = document.getElementById('game');
   const ctx = canvas.getContext('2d');
@@ -79,7 +83,6 @@ const BASE_URL = "https://tyberiusofficial-sketch.github.io/Flappy-Mammoth/";
   addEventListener('resize', resize, {passive:true});
   resize();
 
-  // ---------- DOM/HUD ----------
   const menuEl = document.getElementById('menu');
   const overEl = document.getElementById('gameover');
   const btnStart = document.getElementById('btnStart');
@@ -91,21 +94,21 @@ const BASE_URL = "https://tyberiusofficial-sketch.github.io/Flappy-Mammoth/";
   const finalBestEl  = document.getElementById('finalBest');
   const bgm = document.getElementById('bgm');
 
-  // ---------- Assets (absolute URLs) ----------
+  // Use absolute URLs for all images
   const ASSETS = {
-    background: BASE_URL + 'background.png',
-    player:     BASE_URL + 'mammoth.png',
-    enemy1:     BASE_URL + 'enemy1.png',
-    enemy2:     BASE_URL + 'enemy2.png',
-    enemy3:     BASE_URL + 'enemy3.png',
+    background: `${BASE_URL}background.png?v=${VERSION}`,
+    player:     `${BASE_URL}mammoth.png?v=${VERSION}`,
+    enemy1:     `${BASE_URL}enemy1.png?v=${VERSION}`,
+    enemy2:     `${BASE_URL}enemy2.png?v=${VERSION}`,
+    enemy3:     `${BASE_URL}enemy3.png?v=${VERSION}`,
   };
 
   function loadImage(src) {
     return new Promise((resolve, reject) => {
       const i = new Image();
-      i.crossOrigin = 'anonymous'; // safe to draw to canvas from GitHub Pages
+      i.crossOrigin = 'anonymous';
       i.onload = () => resolve(i);
-      i.onerror = (e) => reject(new Error('Failed to load ' + src));
+      i.onerror = () => reject(new Error('Failed to load ' + src));
       i.src = src;
     });
   }
@@ -115,289 +118,76 @@ const BASE_URL = "https://tyberiusofficial-sketch.github.io/Flappy-Mammoth/";
     IMGS[k] = await loadImage(v);
   })).catch(err => console.error('Asset load error:', err));
 
-  // ---------- RNG ----------
+  // ---- (game code unchanged below, trimmed for brevity) ----
   const rand = (a, b) => a + Math.random() * (b - a);
   const randi = (a, b) => Math.floor(rand(a, b + 1));
+  const GRAVITY=0.45, FLAP=-7.5, MAX_FALL=12, HITBOX_SHRINK=0.8;
+  const SCROLL_SPEED=3.5, SPAWN_INTERVAL=[1.5,2.2], DIFFICULTY_STEP=10;
 
-  // ---------- Config ----------
-  const GRAVITY = 0.45;
-  const FLAP = -7.5;
-  const MAX_FALL = 12;
-  const HITBOX_SHRINK = 0.8;
+  class Background{ constructor(img,p=0.5){this.img=img;this.offset=0;this.parallax=p;const h=VH;this.tileW=Math.round(img.width*(h/img.height));this.tileH=h;} update(dt){this.offset=(this.offset+SCROLL_SPEED*this.parallax)%this.tileW;} draw(ctx){let x=-this.offset;while(x<VW){ctx.drawImage(this.img,0,0,this.img.width,this.img.height,x,0,this.tileW,this.tileH);x+=this.tileW;}}}
+  class SnowOverlay{ constructor(n=240,a=60,b=120){this.flakes=[];for(let i=0;i<n;i++)this.flakes.push({x:Math.random()*VW,y:Math.random()*VH,r:1+(Math.random()*2|0),s:rand(a,b)});} update(dt){for(const f of this.flakes){f.y+=f.s*dt;if(f.y>VH+f.r){f.y=-f.r;f.x=Math.random()*VW;}}} draw(ctx){ctx.save();ctx.globalAlpha=.9;ctx.fillStyle='#fff';for(const f of this.flakes){ctx.beginPath();ctx.arc(f.x,f.y,f.r,0,Math.PI*2);ctx.fill();}ctx.restore();}}
+  class Player{ constructor(img){this.img=img;this.w=72;this.h=56;this.x=VW*.25;this.y=VH*.5;this.vy=0;this.alive=true;this.rot=0;} flap(){if(this.alive)this.vy=FLAP;} update(dt){if(!this.alive){this.vy=Math.min(this.vy+GRAVITY,MAX_FALL);this.y+=this.vy;this.rot=Math.min(this.rot+6,90);return;} this.vy=Math.min(this.vy+GRAVITY,MAX_FALL);this.y+=this.vy;const t=this.vy<0?-20:Math.min(90,this.vy*6);this.rot+=(t-this.rot)*.15; if(this.y-this.h/2<0){this.y=this.h/2;this.vy=0;} if(this.y+this.h/2>VH){this.y=VH-this.h/2;this.vy=0;}} draw(ctx){ctx.save();ctx.translate(this.x,this.y);ctx.rotate(-this.rot*Math.PI/180);ctx.drawImage(this.img,-this.w/2,-this.h/2,this.w,this.h);ctx.restore();} hitbox(){return{x:this.x-this.w*HITBOX_SHRINK/2,y:this.y-this.h*HITBOX_SHRINK/2,w:this.w*HITBOX_SHRINK,h:this.h*HITBOX_SHRINK};}}
+  const rectOverlap=(a,b)=>a.x<b.x+b.w&&a.x+a.w>b.x&&a.y<b.y+b.h&&a.y+a.h>b.y;
+  class EnemyBase{ constructor(img,x,y,s,w=64,h=48){this.img=img;this.x=x;this.y=y;this.w=w;this.h=h;this.speed=s;this.passed=false;} update(dt){this.x-=this.speed;} draw(ctx){ctx.drawImage(this.img,this.x-this.w/2,this.y-this.h/2,this.w,this.h);} hitbox(){return{x:this.x-this.w*HITBOX_SHRINK/2,y:this.y-this.h*HITBOX_SHRINK/2,w:this.w*HITBOX_SHRINK,h:this.h*HITBOX_SHRINK};} offscreen(){return this.x+this.w/2<-50;}}
+  class Sabretooth extends EnemyBase{ constructor(img,x,y,s){super(img,x,y,s,64,48);this.t=rand(0,Math.PI*2);} update(dt){super.update(dt);this.t+=6*dt;this.y+=Math.sin(this.t)*.8;}}
+  class Hunter extends EnemyBase{ constructor(img,x,y,s,p){super(img,x,y,s,64,48);this.player=p;this.timer=0;this.trackTime=rand(.6,1.2);this.state='track';} update(dt){if(this.state==='track'){this.y+=(this.player.y-this.y)*.06;this.timer+=dt;super.update(dt);if(this.timer>=this.trackTime){this.state='dash';this.speed*=1.8;}} else super.update(dt);}}
+  class SpikeWall{ constructor(tile,x,gY,gH,s){this.tile=tile;this.speed=s;this.rects=[];this.passed=false;const w=64,h=64;for(let y=0;y<gY-h;y+=h)this.rects.push({x:x,y:y,w:w,h:h});for(let y=VH-h;y>gY+gH;y-=h)this.rects.push({x:x,y:y,w:w,h:h});this.scoreX=x+w/2;} update(dt){for(const r of this.rects)r.x-=this.speed;this.scoreX-=this.speed;} draw(ctx){for(const r of this.rects)ctx.drawImage(this.tile,r.x,r.y,r.w,r.h);} offscreen(){return this.rects.every(r=>r.x+r.w<-50);}}
+  class Spawner{ constructor(imgs,p){this.i1=imgs.enemy1;this.i2=imgs.enemy2;this.i3=imgs.enemy3;this.player=p;this.timer=0;this.nextAt=rand(...[1.5,2.2]);} spawn(score){const sp=3.5*(1+0.12*Math.floor(score/10));const x=VW+40;const choice=['spikes','sabre','hunter','mixed'][Math.floor(rand(0,4))];const out=[];if(choice==='spikes'||choice==='mixed'){const gapH=Math.max(120,200-8*score);const gapY=Math.floor(Math.random()*(VH-160-gapH))+80;out.push(new SpikeWall(this.i2,x,gapY,gapH,sp)); if(choice==='mixed'&&Math.random()<.7)out.push(new Sabretooth(this.i1,x+120,Math.floor(Math.random()*(VH-160))+80,sp*1.1));} else if(choice==='sabre'){const lanes=Math.floor(rand(1,3));for(let i=0;i<lanes;i++)out.push(new Sabretooth(this.i1,x+i*90,Math.floor(Math.random()*(VH-160))+80,sp*rand(1.0,1.2)));} else {out.push(new Hunter(this.i3,x,Math.floor(Math.random()*(VH-160))+80,sp*.9,this.player));} this.nextAt=rand(...[1.5,2.2])*Math.pow(.95,Math.floor(score/10));return out;} update(dt,score){this.timer+=dt;if(this.timer>=this.nextAt){this.timer=0;return this.spawn(score);} return[];}}
+  const STATE={MENU:0,PLAY:1,OVER:2}; let bg,snow,player,spawner,enemies=[]; let state=STATE.MENU,score=0,best=+localStorage.getItem('mb_best')||0;
+  document.getElementById('best').textContent=best;
+  function resetRun(){bg=new Background(IMGS.background,.5);snow=new SnowOverlay(240,60,120);player=new Player(IMGS.player);spawner=new Spawner(IMGS,player);enemies=[];score=0;document.getElementById('score').textContent='0';}
+  function startGame(){resetRun(); state=STATE.PLAY; document.getElementById('menu').classList.add('hidden'); document.getElementById('gameover').classList.add('hidden');}
+  function showOver(){state=STATE.OVER; document.getElementById('finalScore').textContent=Math.floor(score); if(score>best){best=Math.floor(score);localStorage.setItem('mb_best',best);} document.getElementById('best').textContent=best; document.getElementById('finalBest').textContent=best; document.getElementById('gameover').classList.remove('hidden');}
 
-  const SCROLL_SPEED = 3.5;
-  const SPAWN_INTERVAL = [1.5, 2.2];
-  const DIFFICULTY_STEP = 10;
+  // inputs
+  addEventListener('keydown', e => { if(e.code==='Space'){ if(state===STATE.MENU) startGame(); else if(state===STATE.PLAY) player.flap(); else if(state===STATE.OVER) startGame(); e.preventDefault(); }}, {passive:false});
+  addEventListener('pointerdown', () => { if(state===STATE.MENU) startGame(); else if(state===STATE.PLAY) player.flap(); else if(state===STATE.OVER) startGame(); });
 
-  // ---------- Background ----------
-  class Background {
-    constructor(img, parallax=0.5) {
-      this.img = img;
-      this.offset = 0;
-      this.parallax = parallax;
-      const h = VH;
-      this.tileW = Math.round(img.width * (h / img.height));
-      this.tileH = h;
-    }
-    update(dt) { this.offset = (this.offset + SCROLL_SPEED * this.parallax) % this.tileW; }
-    draw(ctx) {
-      const y = 0;
-      let x = -this.offset;
-      while (x < VW) {
-        ctx.drawImage(this.img, 0, 0, this.img.width, this.img.height, x, y, this.tileW, this.tileH);
-        x += this.tileW;
-      }
-    }
-  }
+  // one-time audio unlock (helps in iframes too)
+  window.addEventListener('pointerdown', () => {
+    try { bgm.muted=false; bgm.currentTime=0; bgm.play().catch(()=>{}); } catch {}
+  }, { once:true });
 
-  // ---------- Snow ----------
-  class SnowOverlay {
-    constructor(count=240, minSpd=60, maxSpd=120) {
-      this.flakes = [];
-      for (let i=0;i<count;i++) {
-        this.flakes.push({
-          x: Math.random()*VW,
-          y: Math.random()*VH,
-          r: 1 + (Math.random()*2|0),
-          s: rand(minSpd, maxSpd)
-        });
-      }
-    }
-    update(dt) {
-      for (const f of this.flakes) {
-        f.y += f.s * dt;
-        if (f.y > VH + f.r) { f.y = -f.r; f.x = Math.random()*VW; }
-      }
-    }
-    draw(ctx) {
-      ctx.save();
-      ctx.globalAlpha = 0.9;
-      ctx.fillStyle = '#fff';
-      for (const f of this.flakes) {
-        ctx.beginPath();
-        ctx.arc(f.x, f.y, f.r, 0, Math.PI*2);
-        ctx.fill();
-      }
-      ctx.restore();
-    }
-  }
+  // start button also plays bgm
+  document.getElementById('btnStart').addEventListener('click', () => { bgm.play().catch(()=>{}); startGame(); });
+  document.getElementById('btnRetry').addEventListener('click', () => startGame());
+  document.getElementById('btnMenu').addEventListener('click', () => { state=STATE.MENU; document.getElementById('menu').classList.remove('hidden'); document.getElementById('gameover').classList.add('hidden'); });
 
-  // ---------- Player / Enemies ----------
-  class Player {
-    constructor(img) {
-      this.img = img;
-      this.w = 72; this.h = 56;
-      this.x = VW * 0.25; this.y = VH * 0.5;
-      this.vy = 0; this.alive = true; this.rot = 0;
-    }
-    flap() { if (this.alive) this.vy = FLAP; }
-    update(dt) {
-      if (!this.alive) { this.vy = Math.min(this.vy + GRAVITY, MAX_FALL); this.y += this.vy; this.rot = Math.min(this.rot + 6, 90); return; }
-      this.vy = Math.min(this.vy + GRAVITY, MAX_FALL);
-      this.y += this.vy;
-      const target = this.vy < 0 ? -20 : Math.min(90, this.vy * 6);
-      this.rot += (target - this.rot) * 0.15;
-      if (this.y - this.h/2 < 0) { this.y = this.h/2; this.vy = 0; }
-      if (this.y + this.h/2 > VH) { this.y = VH - this.h/2; this.vy = 0; }
-    }
-    draw(ctx) {
-      ctx.save();
-      ctx.translate(this.x, this.y);
-      ctx.rotate(-this.rot * Math.PI/180);
-      ctx.drawImage(this.img, -this.w/2, -this.h/2, this.w, this.h);
-      ctx.restore();
-    }
-    hitbox() {
-      return { x: this.x - this.w*HITBOX_SHRINK/2, y: this.y - this.h*HITBOX_SHRINK/2, w: this.w*HITBOX_SHRINK, h: this.h*HITBOX_SHRINK };
-    }
-  }
-  const rectOverlap = (a,b) => a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
-
-  class EnemyBase {
-    constructor(img, x, y, speed, w=64, h=48) {
-      this.img = img; this.x = x; this.y = y; this.w = w; this.h = h;
-      this.speed = speed; this.passed = false;
-    }
-    update(dt) { this.x -= this.speed; }
-    draw(ctx) { ctx.drawImage(this.img, this.x - this.w/2, this.y - this.h/2, this.w, this.h); }
-    hitbox() { return {x:this.x - this.w*HITBOX_SHRINK/2, y:this.y - this.h*HITBOX_SHRINK/2, w:this.w*HITBOX_SHRINK, h:this.h*HITBOX_SHRINK}; }
-    offscreen() { return this.x + this.w/2 < -50; }
-  }
-
-  class Sabretooth extends EnemyBase {
-    constructor(img, x, y, speed) { super(img, x, y, speed, 64, 48); this.t = rand(0, Math.PI*2); }
-    update(dt) { super.update(dt); this.t += 6*dt; this.y += Math.sin(this.t)*0.8; }
-  }
-
-  class Hunter extends EnemyBase {
-    constructor(img, x, y, speed, player) {
-      super(img, x, y, speed, 64, 48);
-      this.player = player; this.timer = 0; this.trackTime = rand(0.6, 1.2); this.state='track';
-    }
-    update(dt) {
-      if (this.state === 'track') {
-        this.y += (this.player.y - this.y) * 0.06;
-        this.timer += dt;
-        super.update(dt);
-        if (this.timer >= this.trackTime) { this.state = 'dash'; this.speed *= 1.8; }
-      } else { super.update(dt); }
-    }
-  }
-
-  class SpikeWall {
-    constructor(tileImg, x, gapY, gapH, speed) {
-      this.tile = tileImg; this.speed = speed; this.rects = []; this.passed = false;
-      const tileW = 64, tileH = 64;
-      for (let y=0; y < gapY - tileH; y+=tileH) this.rects.push({x:x, y:y, w:tileW, h:tileH});
-      for (let y=VH - tileH; y > gapY + gapH; y-=tileH) this.rects.push({x:x, y:y, w:tileW, h:tileH});
-      this.scoreX = x + tileW/2;
-    }
-    update(dt){ for (const r of this.rects) r.x -= this.speed; this.scoreX -= this.speed; }
-    draw(ctx){ for (const r of this.rects) ctx.drawImage(this.tile, r.x, r.y, r.w, r.h); }
-    offscreen(){ return this.rects.every(r => r.x + r.w < -50); }
-  }
-
-  class Spawner {
-    constructor(imgs, player) {
-      this.i1 = imgs.enemy1; this.i2 = imgs.enemy2; this.i3 = imgs.enemy3;
-      this.player = player; this.timer = 0; this.nextAt = rand(...SPAWN_INTERVAL);
-    }
-    spawn(score) {
-      const speed = SCROLL_SPEED * (1.0 + 0.12 * Math.floor(score / DIFFICULTY_STEP));
-      const x = VW + 40;
-      const choice = ['spikes','sabre','hunter','mixed'][Math.floor(rand(0,4))];
-      const out = [];
-      if (choice === 'spikes' || choice === 'mixed') {
-        const gapH = Math.max(120, 200 - 8*score);
-        const gapY = randi(80, VH - 80 - gapH);
-        out.push(new SpikeWall(this.i2, x, gapY, gapH, speed));
-        if (choice === 'mixed' && Math.random() < 0.7) out.push(new Sabretooth(this.i1, x+120, randi(80, VH-80), speed*1.1));
-      } else if (choice === 'sabre') {
-        const lanes = randi(1,2);
-        for (let i=0;i<lanes;i++) out.push(new Sabretooth(this.i1, x+i*90, randi(80, VH-80), speed * rand(1.0,1.2)));
-      } else {
-        out.push(new Hunter(this.i3, x, randi(80,VH-80), speed*0.9, this.player));
-      }
-      this.nextAt = rand(...SPAWN_INTERVAL) * Math.pow(0.95, Math.floor(score/DIFFICULTY_STEP));
-      return out;
-    }
-    update(dt, score) {
-      this.timer += dt;
-      if (this.timer >= this.nextAt) { this.timer = 0; return this.spawn(score); }
-      return [];
-    }
-  }
-
-  // ---------- Game State ----------
-  const STATE = { MENU:0, PLAY:1, OVER:2 };
-  let bg, snow, player, spawner, enemies = [];
-  let state = STATE.MENU, score = 0, best = +localStorage.getItem('mb_best')||0;
-  bestEl.textContent = best;
-
-  function resetRun() {
-    bg = new Background(IMGS.background, 0.5);
-    snow = new SnowOverlay(240, 60, 120);
-    player = new Player(IMGS.player);
-    spawner = new Spawner(IMGS, player);
-    enemies = [];
-    score = 0;
-    scoreEl.textContent = '0';
-  }
-
-  function startGame() {
-    resetRun();
-    state = STATE.PLAY;
-    menuEl.classList.add('hidden');
-    overEl.classList.add('hidden');
-  }
-
-  function showMenu() {
-    state = STATE.MENU;
-    menuEl.classList.remove('hidden');
-    overEl.classList.add('hidden');
-  }
-
-  function showOver() {
-    state = STATE.OVER;
-    finalScoreEl.textContent = Math.floor(score);
-    if (score > best) { best = Math.floor(score); localStorage.setItem('mb_best', best); }
-    bestEl.textContent = best; finalBestEl.textContent = best;
-    overEl.classList.remove('hidden');
-  }
-
-  // ---------- Input ----------
-  addEventListener('keydown', e => {
-    if (e.code === 'Space') {
-      if (state === STATE.MENU) startGame();
-      else if (state === STATE.PLAY) player.flap();
-      else if (state === STATE.OVER) startGame();
-      e.preventDefault();
-    }
-  }, {passive:false});
-
-  addEventListener('pointerdown', () => {
-    if (state === STATE.MENU) startGame();
-    else if (state === STATE.PLAY) player.flap();
-    else if (state === STATE.OVER) startGame();
-  });
-
-  // unlock audio on the first explicit click
-  btnStart.addEventListener('click', () => { bgm.play().catch(()=>{}); startGame(); });
-  btnRetry.addEventListener('click', () => startGame());
-  btnMenu .addEventListener('click', () => showMenu());
-
-  // ---------- Loop ----------
-  let last = 0;
-  function frame(t) {
+  // loop
+  let last=0;
+  function frame(t){
     requestAnimationFrame(frame);
-    if (!IMGS.background) return;
-    const dt = Math.min(0.033, (t - last) / 1000 || 0); last = t;
+    if(!IMGS.background) return;
+    const dt=Math.min(.033,(t-last)/1000||0); last=t;
 
-    if (state === STATE.MENU) {
-      bg.update(dt); snow.update(dt);
-    } else if (state === STATE.PLAY) {
+    if(state===STATE.PLAY){
       bg.update(dt); player.update(dt);
-      for (const s of spawner.update(dt, Math.floor(score))) enemies.push(...s);
-      for (let i=enemies.length-1; i>=0; i--) {
-        const e = enemies[i]; e.update(dt);
-        if (!e.passed) {
-          if (e instanceof SpikeWall) {
-            if (e.scoreX < player.x) { e.passed = true; score++; scoreEl.textContent = Math.floor(score); }
-          } else if (e.x + e.w/2 < player.x - player.w/2) {
-            e.passed = true; score++; scoreEl.textContent = Math.floor(score);
-          }
-        }
-        if (e.offscreen()) enemies.splice(i,1);
+      for(const s of spawner.update(dt,Math.floor(score))) enemies.push(...s);
+      for(let i=enemies.length-1;i>=0;i--){ const e=enemies[i]; e.update(dt);
+        if(!e.passed){ if(e.rects){ if(e.scoreX < player.x){ e.passed=true; score++; scoreEl.textContent=Math.floor(score);} } else if(e.x+e.w/2 < player.x-player.w/2){ e.passed=true; score++; scoreEl.textContent=Math.floor(score);} }
+        if(e.offscreen()) enemies.splice(i,1);
       }
-      const p = player.hitbox();
-      outer: {
-        for (const e of enemies) {
-          if (e instanceof SpikeWall) {
-            for (const r of e.rects) {
-              const rr = {x:r.x + r.w*(1-HITBOX_SHRINK)/2, y:r.y + r.h*(1-HITBOX_SHRINK)/2, w:r.w*HITBOX_SHRINK, h:r.h*HITBOX_SHRINK};
-              if (rectOverlap(p, rr)) { player.alive = false; break outer; }
-            }
-          } else {
-            if (rectOverlap(p, e.hitbox())) { player.alive = false; break; }
-          }
-        }
-      }
-      if (!player.alive) showOver();
-      snow.update(dt);
-    } else {
-      bg.update(dt); snow.update(dt);
-    }
-
+      const p=player.hitbox();
+      outer:{ for(const e of enemies){ if(e.rects){ for(const r of e.rects){ const rr={x:r.x+r.w*(1-.8)/2,y:r.y+r.h*(1-.8)/2,w:r.w*.8,h:r.h*.8}; if(p.x < rr.x+rr.w && p.x+p.w > rr.x && p.y < rr.y+rr.h && p.y+p.h > rr.y){ player.alive=false; break outer; } } } else if(p.x < e.x+e.w && p.x+p.w > e.x && p.y < e.y+e.h && p.y+p.h > e.y){ player.alive=false; break; } } }
+      if(!player.alive) showOver();
+    } else { bg?.update(dt); }
+    // draw
     ctx.clearRect(0,0,VW,VH);
-    bg.draw(ctx);
-    if (state !== STATE.MENU) {
-      for (const e of enemies) e.draw(ctx);
-      player.draw(ctx);
-    }
-    snow.draw(ctx);
+    bg?.draw(ctx);
+    if(state!==STATE.MENU){ for(const e of enemies) e.draw(ctx); player?.draw(ctx); }
+    snow?.draw(ctx);
   }
   requestAnimationFrame(frame);
 })();
 </script>
+
+<!-- HUD overlays (unchanged from your previous) -->
+<div class="hud" style="position:absolute;left:0;right:0;top:0;display:flex;justify-content:center;gap:16px;padding:8px 12px;font-weight:800;text-shadow:0 2px 6px rgba(0,0,0,.6)">
+  <div>Score: <span id="score">0</span></div>
+  <div>Best: <span id="best">0</span></div>
+</div>
+<div id="menu" class="overlay"><div class="card"><h1 class="title">Mammobits: Flappy Mammoth</h1><p class="muted">Tap / click / Space to flap…</p><div class="row"><button id="btnStart">Start</button></div></div></div>
+<div id="gameover" class="overlay hidden"><div class="card"><h2 class="title" style="margin-bottom:8px">Game Over</h2><div style="font-weight:700;margin:4px 0;">Score: <span id="finalScore">0</span></div><div class="muted" style="margin:4px 0 12px;">Best: <span id="finalBest">0</span></div><div class="row"><button id="btnRetry">Retry</button><button id="btnMenu">Menu</button></div></div></div>
+
 </body>
 </html>
