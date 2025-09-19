@@ -8,17 +8,51 @@
     :root { --w: 800px; --h: 450px; }
     body { display:grid; place-items:center; min-height:100vh; background:#0a0f14; color:#e7f4ff; font:16px system-ui, sans-serif; }
     .wrap { display:flex; flex-direction:column; align-items:center; gap:8px; }
-    canvas { width:var(--w); height:var(--h); image-rendering: pixelated; border-radius:8px; box-shadow:0 10px 35px rgba(0,0,0,.45); background:#003; }
+    canvas { width:var(--w); height:var(--h); image-rendering: pixelated; border-radius:8px; box-shadow:0 10px 35px rgba(0,0,0,.45); background:#003; position:relative; }
     .hud { width:var(--w); display:flex; justify-content:space-between; gap:8px; font-weight:700; }
     button { padding:.6rem 1rem; border-radius:10px; border:0; background:#1e90ff; color:white; font-weight:700; cursor:pointer; }
     button:disabled{ opacity:.5; cursor:not-allowed; }
     a{ color:#9fe2ff; }
+
+    /* Game Over card (simple, like a mini modal) */
+    .over {
+      position: absolute;
+      width: var(--w);
+      height: var(--h);
+      display: none;              /* shown on game over */
+      align-items: center;
+      justify-content: center;
+      inset: 0;
+    }
+    .card {
+      background: rgba(255,255,255,.08);
+      border: 1px solid rgba(255,255,255,.18);
+      padding: 18px 22px;
+      border-radius: 14px;
+      backdrop-filter: blur(6px);
+      text-align: center;
+      box-shadow: 0 10px 35px rgba(0,0,0,.45);
+    }
+    .title { font-size: clamp(20px, 3.5vw, 36px); font-weight: 900; margin: 0 0 8px; }
+    .muted { opacity:.85 }
+    .abs { position: relative; }
   </style>
 </head>
 <body>
   <div class="wrap">
     <div class="hud"><div>Score: <span id="score">0</span></div><div>Best: <span id="best">0</span></div></div>
-    <canvas id="game" width="800" height="450"></canvas>
+
+    <div class="abs" style="width:var(--w); height:var(--h);">
+      <canvas id="game" width="800" height="450"></canvas>
+      <div id="gameOver" class="over">
+        <div class="card">
+          <div class="title">Game Over</div>
+          <div style="font-weight:700;margin:8px 0;">Final Score: <span id="finalScore">0</span></div>
+          <div class="muted" style="margin-bottom:10px;">Press <b>Start</b> to play again</div>
+        </div>
+      </div>
+    </div>
+
     <div style="display:flex; gap:8px; align-items:center;">
       <button id="startBtn">Start</button>
       <small>Controls: click / tap / Space. Audio starts after you press <b>Start</b>.</small>
@@ -30,7 +64,7 @@
   <audio id="bgm" src="backgroundmusic.mp3" preload="auto" loop></audio>
 
   <script>
-  // ======= Config (simple, Coin-Catcher style) =======
+  // ======= Config =======
   const W = 800, H = 450;
   const GRAVITY = 0.45, FLAP_V = -7.5, MAX_FALL = 12;
   const SCROLL = 3.5;
@@ -45,7 +79,7 @@
   const ctx = canvas.getContext('2d');
   ctx.imageSmoothingEnabled = false;
 
-  // ======= Assets (relative paths, same as Coin-Catcher) =======
+  // ======= Assets (relative) =======
   const images = {
     bg:  loadImg('background.png'),
     mam: loadImg('mammoth.png'),
@@ -55,11 +89,14 @@
   };
   function loadImg(src){ const i = new Image(); i.src = src; return i; }
 
-  // ======= HUD / Audio =======
+  // ======= HUD / Audio / Over =======
   const scoreEl = document.getElementById('score');
   const bestEl  = document.getElementById('best');
   const startBtn = document.getElementById('startBtn');
   const bgm = document.getElementById('bgm');
+  const over = document.getElementById('gameOver');
+  const finalScoreEl = document.getElementById('finalScore');
+
   let best = +localStorage.getItem('mb_best') || 0;
   bestEl.textContent = best;
 
@@ -77,17 +114,16 @@
   const player = { x: W*0.25, y: H*0.5, w:72, h:56, vy:0, alive:true, rot:0 };
 
   // actors
-  const enemies = []; // mix of spikes (rects) and sprites
+  const enemies = []; // spikes + sprites
 
-  // snow (simple)
+  // snow
   const snow = [];
   for (let i=0;i<220;i++) snow.push({x:Math.random()*W,y:Math.random()*H,r:1+(Math.random()*2|0),s:60+Math.random()*60});
 
-  // input (Coin-Catcher style)
+  // input
   addEventListener('keydown', e=>{
     if(e.code==='Space'){
-      if(!running) { /* ignore, Start button controls run state */ }
-      else flap();
+      if(running) flap();
       e.preventDefault();
     }
     if(e.key==='Enter' && !running) startBtn.click();
@@ -97,11 +133,12 @@
     if(running) flap();
   });
 
-  // one-time audio unlock (helps in iframe too)
+  // one-time audio unlock
   window.addEventListener('pointerdown', () => { try{ bgm.muted=false; bgm.currentTime=0; bgm.play().catch(()=>{});}catch{} }, { once:true });
 
   startBtn.onclick = async () => {
     if(running) return;
+    hideOver();
     reset();
     try { await bgm.play(); } catch {}
     lastT = performance.now();
@@ -110,24 +147,22 @@
   };
 
   function reset(){
-    running = false;
     score = 0;
     scoreEl.textContent = score;
     enemies.length = 0;
     player.x = W*0.25; player.y = H*0.5; player.vy=0; player.alive=true; player.rot=0;
     spawnAcc = 0; nextSpawnMs = randMs(SPAWN_MIN_MS, SPAWN_MAX_MS);
-    // init background tile width when image ready
     if(images.bg.complete && !bg.ready){
       bg.tileW = Math.round(images.bg.width * (H / images.bg.height));
-      bg.tileH = H;
-      bg.ready = true;
+      bg.tileH = H; bg.ready = true;
     }
   }
 
   // ======= Loop =======
   function loop(t){
     if(!running) return;
-    const dt = Math.min(33, t - lastT); // ms
+    const dtMs = Math.min(33, t - lastT);
+    const dt = dtMs / 1000; // seconds
     lastT = t;
 
     // physics: player
@@ -144,10 +179,10 @@
     bg.offset = (bg.offset + SCROLL) % (bg.tileW || W);
 
     // snow
-    for(const f of snow){ f.y += (f.s * dt/1000); if(f.y>H+f.r){ f.y=-f.r; f.x=Math.random()*W; } }
+    for(const f of snow){ f.y += (f.s * dt); if(f.y>H+f.r){ f.y=-f.r; f.x=Math.random()*W; } }
 
     // spawn
-    spawnAcc += dt;
+    spawnAcc += dtMs;
     if (spawnAcc >= nextSpawnMs){
       spawnAcc = 0;
       nextSpawnMs = randMs(
@@ -160,7 +195,7 @@
     // update enemies & score & collisions
     for(let i=enemies.length-1;i>=0;i--){
       const e = enemies[i];
-      e.x -= e.speed;
+      updateEnemy(e, dt);
       if (!e.passed && passCheck(e)) { e.passed = true; score++; scoreEl.textContent = score; }
       if (collides(e) && player.alive) { player.alive = false; return gameOver(); }
       if (offscreen(e)) enemies.splice(i,1);
@@ -172,13 +207,7 @@
     requestAnimationFrame(loop);
   }
 
-  // ======= Helpers =======
-  function flap(){ if(player.alive) player.vy = FLAP_V; }
-
-  function rand(a,b){ return a + Math.random()*(b-a); }
-  function randi(a,b){ return Math.floor(rand(a,b+1)); }
-  function randMs(a,b){ return Math.floor(rand(a,b)); }
-
+  // ======= Enemies =======
   function spawnPack(score){
     const speed = SCROLL * (1.0 + 0.12 * Math.floor(score / DIFF_STEP));
     const choice = ['spikes','sabre','hunter','mixed'][Math.floor(rand(0,4))];
@@ -187,26 +216,46 @@
       const gapH = Math.max(120, 200 - 8*score);
       const gapY = randi(80, H-80-gapH);
       arr.push(makeSpikeWall(W+40, gapY, gapH, speed));
-      if (choice==='mixed' && Math.random()<0.7) arr.push(makeSprite(images.e1, W+160, randi(80,H-80), speed*1.1, 64,48,'sabre'));
+      if (choice==='mixed' && Math.random()<0.7) arr.push(makeSabre(W+160, randi(80,H-80), speed*1.1));
     } else if (choice==='sabre'){
       const lanes = randi(1,2);
-      for(let i=0;i<lanes;i++) arr.push(makeSprite(images.e1, W+40+i*90, randi(80,H-80), speed*rand(1.0,1.2), 64,48,'sabre'));
+      for(let i=0;i<lanes;i++) arr.push(makeSabre(W+40+i*90, randi(80,H-80), speed*rand(1.0,1.2)));
     } else {
-      arr.push(makeSprite(images.e3, W+40, randi(80,H-80), speed*0.9, 64,48,'hunter'));
+      arr.push(makeHunter(W+40, randi(80,H-80), speed*0.9));
     }
     return arr;
   }
 
-  function makeSprite(img,x,y,s,w,h,type){
-    return { kind:'sprite', img, x, y, w, h, speed:s, passed:false, type };
+  function makeSabre(x,y,s){ return { kind:'sprite', type:'sabre', img:images.e1, x, y, w:64, h:48, speed:s, passed:false, t:rand(0,Math.PI*2) }; }
+  function makeHunter(x,y,s){
+    return { kind:'sprite', type:'hunter', img:images.e3, x, y, w:64, h:48, speed:s, passed:false,
+             state:'track', timer:0, trackTime:rand(0.6,1.2) };
   }
-
   function makeSpikeWall(x,gapY,gapH,s){
     const tileW=64, tileH=64;
     const rects=[];
-    for(let y=0;y<gapY-tileH;y+=tileH) rects.push({x,y,w:tileW,h:tileH});
-    for(let y=H-tileH;y>gapY+gapH;y-=tileH) rects.push({x,y,w:tileW,h:tileH});
+    for(let y=0;y<gapY-tileH;y+=tileH) rects.push({x:0,y,w:tileW,h:tileH});
+    for(let y=H-tileH;y>gapY+gapH;y-=tileH) rects.push({x:0,y,w:tileW,h:tileH});
     return { kind:'spikes', img:images.e2, x, speed:s, rects, scoreX:x+tileW/2, passed:false };
+  }
+
+  function updateEnemy(e, dt){
+    if (e.kind==='spikes'){
+      e.x -= e.speed;
+    } else if (e.type==='sabre'){
+      e.x -= e.speed;
+      e.t += 6*dt;
+      e.y += Math.sin(e.t)*0.8;
+    } else if (e.type==='hunter'){
+      if (e.state==='track'){
+        e.y += (player.y - e.y) * 0.06; // gently track
+        e.timer += dt;
+        e.x -= e.speed;
+        if (e.timer >= e.trackTime){ e.state='dash'; e.speed *= 1.8; }
+      } else { // dash
+        e.x -= e.speed;
+      }
+    }
   }
 
   function passCheck(e){
@@ -215,10 +264,11 @@
   }
 
   function offscreen(e){
-    if (e.kind==='spikes') return e.rects.every(r => (r.x + r.w - (W+40 - e.x)) < -50); // approximate
-    return e.x + (e.w||0)/2 < -50;
+    if (e.kind==='spikes') return (e.x + 64) < -50;
+    return e.x + e.w/2 < -50;
   }
 
+  // ======= Collisions & Draw =======
   function collides(e){
     const p = { x: player.x - player.w*HITBOX_SHRINK/2,
                 y: player.y - player.h*HITBOX_SHRINK/2,
@@ -227,7 +277,7 @@
     if (e.kind==='spikes'){
       for(const r of e.rects){
         const rr = {
-          x: r.x + e.x - (W+40), // convert to world x (we move e.x left)
+          x: r.x + e.x - 64,      // tile origin as e.x - 64 margin
           y: r.y,
           w: r.w*HITBOX_SHRINK,
           h: r.h*HITBOX_SHRINK
@@ -251,7 +301,7 @@
   function aabb(a,b){ return !(a.x+a.w<b.x || b.x+b.w<a.x || a.y+a.h<b.y || b.y+b.h<a.y); }
 
   function draw(){
-    // bg
+    // bg tiling
     if(images.bg.complete){
       if(!bg.ready){ bg.tileW = Math.round(images.bg.width * (H / images.bg.height)); bg.tileH = H; bg.ready = true; }
       let x = - (bg.offset % (bg.tileW||W));
@@ -264,7 +314,7 @@
     for(const e of enemies){
       if (e.kind==='spikes'){
         for(const r of e.rects){
-          const drawX = r.x + e.x - (W+40);
+          const drawX = r.x + e.x - 64;
           if(images.e2.complete) ctx.drawImage(images.e2, drawX, r.y, r.w, r.h);
         }
       } else {
@@ -286,16 +336,23 @@
     ctx.globalAlpha = 1;
   }
 
+  function showOver(){ over.style.display = 'flex'; }
+  function hideOver(){ over.style.display = 'none'; }
+
   function gameOver(){
     running = false;
     try{ bgm.pause(); }catch{}
     if (score > best) { best = score; localStorage.setItem('mb_best', best); }
     bestEl.textContent = best;
-    setTimeout(()=>{
-      alert(`Game Over!\nFinal Score: ${score}\nBest: ${best}\nVisit: mammobits.com`);
-      scoreEl.textContent = '0';
-    },50);
+    finalScoreEl.textContent = score;
+    showOver();
   }
+
+  // ======= Utils =======
+  function flap(){ if(player.alive) player.vy = FLAP_V; }
+  function rand(a,b){ return a + Math.random()*(b-a); }
+  function randi(a,b){ return Math.floor(rand(a,b+1)); }
+  function randMs(a,b){ return Math.floor(rand(a,b)); }
   </script>
 </body>
 </html>
