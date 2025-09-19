@@ -51,12 +51,16 @@
   </div>
 </div>
 
-<audio id="bgm" preload="auto" loop src="backgroundmusic.mp3"></audio>
+<!-- IMPORTANT: use absolute GitHub Pages URLs -->
+<script>
+const BASE_URL = "https://tyberiusofficial-sketch.github.io/Flappy-Mammoth/";
+</script>
+<audio id="bgm" preload="auto" loop src="https://tyberiusofficial-sketch.github.io/Flappy-Mammoth/backgroundmusic.mp3"></audio>
 
 <script>
 (() => {
   // ---------- Virtual canvas (logic space) ----------
-  const VW = 800, VH = 450;              // match Python version
+  const VW = 800, VH = 450;
   const canvas = document.getElementById('game');
   const ctx = canvas.getContext('2d');
 
@@ -66,7 +70,6 @@
     canvas.width  = Math.round(w * dpr);
     canvas.height = Math.round(h * dpr);
     ctx.setTransform(1,0,0,1,0,0);
-    // letterbox scale: fit VW×VH to screen
     const scale = Math.min(canvas.width / VW, canvas.height / VH);
     const ox = (canvas.width - VW * scale) / 2;
     const oy = (canvas.height - VH * scale) / 2;
@@ -88,20 +91,21 @@
   const finalBestEl  = document.getElementById('finalBest');
   const bgm = document.getElementById('bgm');
 
-  // ---------- Assets ----------
+  // ---------- Assets (absolute URLs) ----------
   const ASSETS = {
-    background: 'background.png',
-    player: 'mammoth.png',
-    enemy1: 'enemy1.png',
-    enemy2: 'enemy2.png',
-    enemy3: 'enemy3.png',
+    background: BASE_URL + 'background.png',
+    player:     BASE_URL + 'mammoth.png',
+    enemy1:     BASE_URL + 'enemy1.png',
+    enemy2:     BASE_URL + 'enemy2.png',
+    enemy3:     BASE_URL + 'enemy3.png',
   };
 
   function loadImage(src) {
     return new Promise((resolve, reject) => {
       const i = new Image();
+      i.crossOrigin = 'anonymous'; // safe to draw to canvas from GitHub Pages
       i.onload = () => resolve(i);
-      i.onerror = reject;
+      i.onerror = (e) => reject(new Error('Failed to load ' + src));
       i.src = src;
     });
   }
@@ -109,15 +113,13 @@
   let IMGS = {};
   Promise.all(Object.entries(ASSETS).map(async ([k, v]) => {
     IMGS[k] = await loadImage(v);
-  })).then(() => {
-    // ready
-  }).catch(err => console.error('Asset load error', err));
+  })).catch(err => console.error('Asset load error:', err));
 
   // ---------- RNG ----------
-  const rand = (a, b) => a + Math.random() * (b - a) ;
+  const rand = (a, b) => a + Math.random() * (b - a);
   const randi = (a, b) => Math.floor(rand(a, b + 1));
 
-  // ---------- Config (match Python feel) ----------
+  // ---------- Config ----------
   const GRAVITY = 0.45;
   const FLAP = -7.5;
   const MAX_FALL = 12;
@@ -127,20 +129,17 @@
   const SPAWN_INTERVAL = [1.5, 2.2];
   const DIFFICULTY_STEP = 10;
 
-  // ---------- Background (tile & loop) ----------
+  // ---------- Background ----------
   class Background {
     constructor(img, parallax=0.5) {
       this.img = img;
       this.offset = 0;
       this.parallax = parallax;
-      // tile scaled to canvas height
       const h = VH;
       this.tileW = Math.round(img.width * (h / img.height));
       this.tileH = h;
     }
-    update(dt) {
-      this.offset = (this.offset + SCROLL_SPEED * this.parallax) % this.tileW;
-    }
+    update(dt) { this.offset = (this.offset + SCROLL_SPEED * this.parallax) % this.tileW; }
     draw(ctx) {
       const y = 0;
       let x = -this.offset;
@@ -151,7 +150,7 @@
     }
   }
 
-  // ---------- Screen-space Snow (independent overlay) ----------
+  // ---------- Snow ----------
   class SnowOverlay {
     constructor(count=240, minSpd=60, maxSpd=120) {
       this.flakes = [];
@@ -159,8 +158,8 @@
         this.flakes.push({
           x: Math.random()*VW,
           y: Math.random()*VH,
-          r: 1 + (Math.random()*2|0),              // 1–3 px
-          s: rand(minSpd, maxSpd)                  // px/sec in virtual units
+          r: 1 + (Math.random()*2|0),
+          s: rand(minSpd, maxSpd)
         });
       }
     }
@@ -209,12 +208,7 @@
       ctx.restore();
     }
     hitbox() {
-      return {
-        x: this.x - this.w*HITBOX_SHRINK/2,
-        y: this.y - this.h*HITBOX_SHRINK/2,
-        w: this.w*HITBOX_SHRINK,
-        h: this.h*HITBOX_SHRINK
-      };
+      return { x: this.x - this.w*HITBOX_SHRINK/2, y: this.y - this.h*HITBOX_SHRINK/2, w: this.w*HITBOX_SHRINK, h: this.h*HITBOX_SHRINK };
     }
   }
   const rectOverlap = (a,b) => a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
@@ -254,9 +248,7 @@
     constructor(tileImg, x, gapY, gapH, speed) {
       this.tile = tileImg; this.speed = speed; this.rects = []; this.passed = false;
       const tileW = 64, tileH = 64;
-      // top
       for (let y=0; y < gapY - tileH; y+=tileH) this.rects.push({x:x, y:y, w:tileW, h:tileH});
-      // bottom
       for (let y=VH - tileH; y > gapY + gapH; y-=tileH) this.rects.push({x:x, y:y, w:tileW, h:tileH});
       this.scoreX = x + tileW/2;
     }
@@ -265,7 +257,6 @@
     offscreen(){ return this.rects.every(r => r.x + r.w < -50); }
   }
 
-  // ---------- Spawner ----------
   class Spawner {
     constructor(imgs, player) {
       this.i1 = imgs.enemy1; this.i2 = imgs.enemy2; this.i3 = imgs.enemy3;
@@ -280,9 +271,7 @@
         const gapH = Math.max(120, 200 - 8*score);
         const gapY = randi(80, VH - 80 - gapH);
         out.push(new SpikeWall(this.i2, x, gapY, gapH, speed));
-        if (choice === 'mixed' && Math.random() < 0.7) {
-          out.push(new Sabretooth(this.i1, x+120, randi(80, VH-80), speed*1.1));
-        }
+        if (choice === 'mixed' && Math.random() < 0.7) out.push(new Sabretooth(this.i1, x+120, randi(80, VH-80), speed*1.1));
       } else if (choice === 'sabre') {
         const lanes = randi(1,2);
         for (let i=0;i<lanes;i++) out.push(new Sabretooth(this.i1, x+i*90, randi(80, VH-80), speed * rand(1.0,1.2)));
@@ -352,6 +341,7 @@
     else if (state === STATE.OVER) startGame();
   });
 
+  // unlock audio on the first explicit click
   btnStart.addEventListener('click', () => { bgm.play().catch(()=>{}); startGame(); });
   btnRetry.addEventListener('click', () => startGame());
   btnMenu .addEventListener('click', () => showMenu());
@@ -363,17 +353,13 @@
     if (!IMGS.background) return;
     const dt = Math.min(0.033, (t - last) / 1000 || 0); last = t;
 
-    // Update
     if (state === STATE.MENU) {
-      bg.update(dt);
-      snow.update(dt);
+      bg.update(dt); snow.update(dt);
     } else if (state === STATE.PLAY) {
-      bg.update(dt);
-      player.update(dt);
+      bg.update(dt); player.update(dt);
       for (const s of spawner.update(dt, Math.floor(score))) enemies.push(...s);
       for (let i=enemies.length-1; i>=0; i--) {
         const e = enemies[i]; e.update(dt);
-        // scoring
         if (!e.passed) {
           if (e instanceof SpikeWall) {
             if (e.scoreX < player.x) { e.passed = true; score++; scoreEl.textContent = Math.floor(score); }
@@ -383,7 +369,6 @@
         }
         if (e.offscreen()) enemies.splice(i,1);
       }
-      // collisions
       const p = player.hitbox();
       outer: {
         for (const e of enemies) {
@@ -398,22 +383,18 @@
         }
       }
       if (!player.alive) showOver();
-
       snow.update(dt);
-    } else if (state === STATE.OVER) {
-      bg.update(dt);
-      snow.update(dt);
+    } else {
+      bg.update(dt); snow.update(dt);
     }
 
-    // Draw
     ctx.clearRect(0,0,VW,VH);
     bg.draw(ctx);
     if (state !== STATE.MENU) {
       for (const e of enemies) e.draw(ctx);
       player.draw(ctx);
     }
-    // HUD number is DOM (top center)
-    snow.draw(ctx); // ALWAYS LAST (screen-space)
+    snow.draw(ctx);
   }
   requestAnimationFrame(frame);
 })();
