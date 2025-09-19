@@ -2,357 +2,318 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
+  <title>Mammobits Arcade — PacMammoth</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Mammobits: Flappy Mammoth</title>
   <style>
-    :root { --w: 800px; --h: 450px; }
-    body { display:grid; place-items:center; min-height:100vh; background:#0a0f14; color:#e7f4ff; font:16px system-ui, sans-serif; }
-    .wrap { display:flex; flex-direction:column; align-items:center; gap:8px; }
-    canvas { width:var(--w); height:var(--h); image-rendering: pixelated; border-radius:8px; box-shadow:0 10px 35px rgba(0,0,0,.45); background:#003; position:relative; }
-    .hud { width:var(--w); display:flex; justify-content:space-between; gap:8px; font-weight:700; }
-    button { padding:.6rem 1rem; border-radius:10px; border:0; background:#1e90ff; color:white; font-weight:700; cursor:pointer; }
-    button:disabled{ opacity:.5; cursor:not-allowed; }
-    a{ color:#9fe2ff; }
-
-    /* Game Over card (simple, like a mini modal) */
-    .over {
-      position: absolute;
-      width: var(--w);
-      height: var(--h);
-      display: none;              /* shown on game over */
-      align-items: center;
-      justify-content: center;
-      inset: 0;
-    }
-    .card {
-      background: rgba(255,255,255,.08);
-      border: 1px solid rgba(255,255,255,.18);
-      padding: 18px 22px;
-      border-radius: 14px;
-      backdrop-filter: blur(6px);
-      text-align: center;
-      box-shadow: 0 10px 35px rgba(0,0,0,.45);
-    }
-    .title { font-size: clamp(20px, 3.5vw, 36px); font-weight: 900; margin: 0 0 8px; }
-    .muted { opacity:.85 }
-    .abs { position: relative; }
+    :root { --size: 20px; }
+    html, body { margin:0; background:#000; color:#fff; font-family:Arial, Helvetica, sans-serif; }
+    #ui { position:fixed; inset:0 0 auto 0; display:flex; gap:16px; padding:10px 14px; align-items:center; }
+    #score { font-weight:700; }
+    #canvas { display:block; margin:48px auto 20px; background:#000; }
+    button { background:#0c8; color:#000; border:0; padding:6px 10px; border-radius:6px; cursor:pointer; }
+    button:active { transform:translateY(1px); }
   </style>
 </head>
 <body>
-  <div class="wrap">
-    <div class="hud"><div>Score: <span id="score">0</span></div><div>Best: <span id="best">0</span></div></div>
-
-    <div class="abs" style="width:var(--w); height:var(--h);">
-      <canvas id="game" width="800" height="450"></canvas>
-      <div id="gameOver" class="over">
-        <div class="card">
-          <div class="title">Game Over</div>
-          <div style="font-weight:700;margin:8px 0;">Final Score: <span id="finalScore">0</span></div>
-          <div class="muted" style="margin-bottom:10px;">Press <b>Start</b> to play again</div>
-        </div>
-      </div>
-    </div>
-
-    <div style="display:flex; gap:8px; align-items:center;">
-      <button id="startBtn">Start</button>
-      <small>Controls: click / tap / Space. Audio starts after you press <b>Start</b>.</small>
-    </div>
-    <small>Flappy Mammoth • <a href="https://mammobits.com" target="_blank">mammobits.com</a></small>
+  <div id="ui">
+    <div id="score">Score: 0</div>
+    <div id="lives">Lives: 3</div>
+    <button id="playAudio" title="Enable sound if browser blocks autoplay">Enable Sound</button>
   </div>
-
-  <!-- Files must be in the same folder as this HTML -->
-  <audio id="bgm" src="backgroundmusic.mp3" preload="auto" loop></audio>
+  <canvas id="canvas" width="420" height="420"></canvas>
+  <audio id="bgm" src="backgroundmusic.mp3" loop preload="auto"></audio>
 
   <script>
-  // ======= Config =======
-  const W = 800, H = 450;
-  const GRAVITY = 0.45, FLAP_V = -7.5, MAX_FALL = 12;
-  const SCROLL = 3.5;
-  const HITBOX_SHRINK = 0.8;
+  // ====== ASSETS ======
+  const mammoth = { up:new Image(), down:new Image(), left:new Image(), right:new Image() };
+  mammoth.up.src="mammoth_up.png";
+  mammoth.down.src="mammoth_down.png";
+  mammoth.left.src="mammoth_left.png";
+  mammoth.right.src="mammoth_right.png";
 
-  const SPAWN_MIN_MS = 1500;
-  const SPAWN_MAX_MS = 2200;
-  const DIFF_STEP = 10; // speed-up every N points
+  const hunter = { up:new Image(), down:new Image(), left:new Image(), right:new Image() };
+  hunter.up.src="hunter_up.png";
+  hunter.down.src="hunter_down.png";
+  hunter.left.src="hunter_left.png";
+  hunter.right.src="hunter_right.png";
 
-  // ======= Canvas =======
-  const canvas = document.getElementById('game');
-  const ctx = canvas.getContext('2d');
-  ctx.imageSmoothingEnabled = false;
+  const coinImg = new Image(); coinImg.src="vinecoin.png";
 
-  // ======= Assets (relative) =======
-  const images = {
-    bg:  loadImg('background.png'),
-    mam: loadImg('mammoth.png'),
-    e1:  loadImg('enemy1.png'),
-    e2:  loadImg('enemy2.png'),
-    e3:  loadImg('enemy3.png'),
-  };
-  function loadImg(src){ const i = new Image(); i.src = src; return i; }
-
-  // ======= HUD / Audio / Over =======
-  const scoreEl = document.getElementById('score');
-  const bestEl  = document.getElementById('best');
-  const startBtn = document.getElementById('startBtn');
   const bgm = document.getElementById('bgm');
-  const over = document.getElementById('gameOver');
-  const finalScoreEl = document.getElementById('finalScore');
+  document.getElementById('playAudio').onclick = () => { bgm.play().catch(()=>{}); };
 
-  let best = +localStorage.getItem('mb_best') || 0;
-  bestEl.textContent = best;
+  // ====== CANVAS / GRID ======
+  const tile = 20;        // pixels per tile (420x420 canvas -> 21 tiles, but maze uses 20x20 inside borders)
+  const cols = 20, rows = 20;
+  const canvas = document.getElementById('canvas');
+  const ctx = canvas.getContext('2d');
 
-  // ======= Game State =======
-  let running = false;
-  let score = 0;
-  let lastT = 0;
-  let spawnAcc = 0;
-  let nextSpawnMs = randMs(SPAWN_MIN_MS, SPAWN_MAX_MS);
+  // ====== MAZE (from your Python `tiles`) ======
+  // 0 = wall, 1 = pellet, 2 = empty (eaten/blank)
+  const tiles = [
+    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+    0,1,1,1,1,1,1,1,0,1,1,1,1,1,1,1,0,0,0,0,
+    0,1,0,0,1,0,0,1,0,1,0,0,1,0,0,1,0,0,0,0,
+    0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,0,0,0,
+    0,1,0,0,1,0,1,0,0,0,1,0,1,0,0,1,0,0,0,0,
+    0,1,1,1,1,0,1,1,0,1,1,0,1,1,1,1,0,0,0,0,
+    0,1,0,0,1,0,0,1,0,1,0,0,1,0,0,0,0,0,0,0,
+    0,1,0,0,1,0,1,1,1,1,1,0,1,0,0,0,0,0,0,0,
+    0,1,1,1,1,1,1,0,0,0,1,1,1,1,1,1,0,0,0,0,
+    0,0,0,0,1,0,1,1,1,1,1,0,1,0,0,1,0,0,0,0,
+    0,0,0,0,1,0,1,0,0,0,1,0,1,0,0,1,0,0,0,0,
+    0,1,1,1,1,1,1,1,0,1,1,1,1,1,1,1,0,0,0,0,
+    0,1,0,0,1,0,0,1,0,1,0,0,0,0,0,1,0,0,0,0,
+    0,1,1,0,1,1,1,1,1,1,1,1,1,0,1,1,0,0,0,0,
+    0,0,1,0,1,0,1,0,0,0,1,0,1,0,1,0,0,0,0,0,
+    0,1,1,1,1,0,1,1,0,1,1,0,1,1,1,1,0,0,0,0,
+    0,1,0,0,0,0,0,1,0,1,0,0,0,0,0,1,0,0,0,0,
+    0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,0,0,0,
+    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+  ];
 
-  // background tiling
-  const bg = { offset:0, tileW:0, tileH:H, ready:false };
+  // ====== HELPERS ======
+  const idx = (x,y)=> x + y*cols;
+  const isWall = (x,y)=> tiles[idx(x,y)]===0;
+  const isPath = (x,y)=> tiles[idx(x,y)]!==0; // 1 or 2
+  const inBounds = (x,y)=> x>=0&&x<cols&&y>=0&&y<rows;
 
-  // player
-  const player = { x: W*0.25, y: H*0.5, w:72, h:56, vy:0, alive:true, rot:0 };
+  function drawMaze(){
+    ctx.fillStyle="#000";
+    ctx.fillRect(0,0,canvas.width,canvas.height);
 
-  // actors
-  const enemies = []; // spikes + sprites
-
-  // snow
-  const snow = [];
-  for (let i=0;i<220;i++) snow.push({x:Math.random()*W,y:Math.random()*H,r:1+(Math.random()*2|0),s:60+Math.random()*60});
-
-  // input
-  addEventListener('keydown', e=>{
-    if(e.code==='Space'){
-      if(running) flap();
-      e.preventDefault();
+    // walls
+    ctx.fillStyle="#0747ff";
+    for(let y=0;y<rows;y++){
+      for(let x=0;x<cols;x++){
+        if(tiles[idx(x,y)]===0){
+          ctx.fillRect(x*tile, y*tile, tile, tile);
+        }else{
+          // tiny pellet guides (we overdraw with coins below where tile==1)
+          ctx.fillStyle="#0747ff";
+          ctx.fillRect(x*tile, y*tile, tile, tile);
+          // carve corridor
+          ctx.fillStyle="#000";
+          ctx.fillRect(x*tile+2, y*tile+2, tile-4, tile-4);
+        }
+      }
     }
-    if(e.key==='Enter' && !running) startBtn.click();
-  }, {passive:false});
 
-  addEventListener('pointerdown', ()=>{
-    if(running) flap();
+    // draw vinecoins for tile==1
+    for(let y=0;y<rows;y++){
+      for(let x=0;x<cols;x++){
+        if(tiles[idx(x,y)]===1){
+          const s = Math.floor(tile*0.6);
+          ctx.drawImage(coinImg, x*tile + (tile-s)/2, y*tile + (tile-s)/2, s, s);
+        }
+      }
+    }
+  }
+
+  // ====== ACTORS ======
+  const DIRS = {
+    up:    {x:0,y:-1, key:"ArrowUp"},
+    down:  {x:0,y:1,  key:"ArrowDown"},
+    left:  {x:-1,y:0, key:"ArrowLeft"},
+    right: {x:1,y:0,  key:"ArrowRight"},
+  };
+
+  let score=0, lives=3;
+  const scoreEl=document.getElementById('score');
+  const livesEl=document.getElementById('lives');
+
+  // Start positions (grid coords)
+  const startMammoth = { x:9, y:15 };              // similar to python example
+  const ghostHouse   = { x:10, y:10 };             // center "box"
+  let player = { x:startMammoth.x, y:startMammoth.y, dir:'left', next:'left', px:startMammoth.x*tile, py:startMammoth.y*tile };
+
+  function resetPlayer(){
+    player.x=startMammoth.x; player.y=startMammoth.y; player.dir='left'; player.next='left';
+    player.px = player.x*tile; player.py = player.y*tile;
+  }
+
+  const ghosts = [];  // active ghosts on board
+  const ghostQueue = [0,1,2,3]; // spawn order
+  const ghostMax = 4;
+  const ghostSpeed = 2; // pixels per frame
+
+  function spawnGhost(){
+    if(ghosts.length>=ghostMax) return;
+    if(ghostQueue.length===0) return;
+    const id = ghostQueue.shift();
+    ghosts.push({
+      id,
+      x:ghostHouse.x, y:ghostHouse.y, dir:'left',
+      px:ghostHouse.x*tile, py:ghostHouse.y*tile,
+    });
+  }
+
+  // Staggered release (like Pacman ghost house)
+  setTimeout(spawnGhost, 1500);
+  setTimeout(spawnGhost, 3500);
+  setTimeout(spawnGhost, 5500);
+  setTimeout(spawnGhost, 7500);
+
+  // ====== INPUT ======
+  window.addEventListener('keydown', e=>{
+    for(const [d,info] of Object.entries(DIRS)){
+      if(e.key===info.key) player.next=d;
+    }
+    // start audio on any keypress (autoplay guard)
+    bgm.play().catch(()=>{});
   });
 
-  // one-time audio unlock
-  window.addEventListener('pointerdown', () => { try{ bgm.muted=false; bgm.currentTime=0; bgm.play().catch(()=>{});}catch{} }, { once:true });
-
-  startBtn.onclick = async () => {
-    if(running) return;
-    hideOver();
-    reset();
-    try { await bgm.play(); } catch {}
-    lastT = performance.now();
-    running = true;
-    requestAnimationFrame(loop);
-  };
-
-  function reset(){
-    score = 0;
-    scoreEl.textContent = score;
-    enemies.length = 0;
-    player.x = W*0.25; player.y = H*0.5; player.vy=0; player.alive=true; player.rot=0;
-    spawnAcc = 0; nextSpawnMs = randMs(SPAWN_MIN_MS, SPAWN_MAX_MS);
-    if(images.bg.complete && !bg.ready){
-      bg.tileW = Math.round(images.bg.width * (H / images.bg.height));
-      bg.tileH = H; bg.ready = true;
-    }
+  // ====== MOVEMENT ======
+  const speed = 2; // pixels per frame (player)
+  function canMove(x,y,dir){
+    const nx = x + DIRS[dir].x;
+    const ny = y + DIRS[dir].y;
+    return inBounds(nx,ny) && isPath(nx,ny);
   }
 
-  // ======= Loop =======
-  function loop(t){
-    if(!running) return;
-    const dtMs = Math.min(33, t - lastT);
-    const dt = dtMs / 1000; // seconds
-    lastT = t;
+  function atCenter(px,py){ return (px%tile===0)&&(py%tile===0); }
 
-    // physics: player
-    if (player.alive) {
-      player.vy = Math.min(player.vy + GRAVITY, MAX_FALL);
-      player.y += player.vy;
-      const target = player.vy < 0 ? -20 : Math.min(90, player.vy*6);
-      player.rot += (target - player.rot) * 0.15;
-      if(player.y - player.h/2 < 0){ player.y = player.h/2; player.vy = 0; }
-      if(player.y + player.h/2 > H){ player.y = H - player.h/2; player.vy = 0; }
-    }
+  function stepPlayer(){
+    if(atCenter(player.px, player.py)){
+      // align to grid
+      player.x = Math.round(player.px/tile);
+      player.y = Math.round(player.py/tile);
 
-    // background scroll
-    bg.offset = (bg.offset + SCROLL) % (bg.tileW || W);
+      // turn if requested and valid
+      if(canMove(player.x, player.y, player.next)) player.dir = player.next;
 
-    // snow
-    for(const f of snow){ f.y += (f.s * dt); if(f.y>H+f.r){ f.y=-f.r; f.x=Math.random()*W; } }
-
-    // spawn
-    spawnAcc += dtMs;
-    if (spawnAcc >= nextSpawnMs){
-      spawnAcc = 0;
-      nextSpawnMs = randMs(
-        SPAWN_MIN_MS * Math.pow(0.95, Math.floor(score/DIFF_STEP)),
-        SPAWN_MAX_MS * Math.pow(0.95, Math.floor(score/DIFF_STEP))
-      );
-      for(const e of spawnPack(Math.floor(score))) enemies.push(e);
-    }
-
-    // update enemies & score & collisions
-    for(let i=enemies.length-1;i>=0;i--){
-      const e = enemies[i];
-      updateEnemy(e, dt);
-      if (!e.passed && passCheck(e)) { e.passed = true; score++; scoreEl.textContent = score; }
-      if (collides(e) && player.alive) { player.alive = false; return gameOver(); }
-      if (offscreen(e)) enemies.splice(i,1);
-    }
-
-    // draw
-    draw();
-
-    requestAnimationFrame(loop);
-  }
-
-  // ======= Enemies =======
-  function spawnPack(score){
-    const speed = SCROLL * (1.0 + 0.12 * Math.floor(score / DIFF_STEP));
-    const choice = ['spikes','sabre','hunter','mixed'][Math.floor(rand(0,4))];
-    const arr = [];
-    if (choice==='spikes' || choice==='mixed'){
-      const gapH = Math.max(120, 200 - 8*score);
-      const gapY = randi(80, H-80-gapH);
-      arr.push(makeSpikeWall(W+40, gapY, gapH, speed));
-      if (choice==='mixed' && Math.random()<0.7) arr.push(makeSabre(W+160, randi(80,H-80), speed*1.1));
-    } else if (choice==='sabre'){
-      const lanes = randi(1,2);
-      for(let i=0;i<lanes;i++) arr.push(makeSabre(W+40+i*90, randi(80,H-80), speed*rand(1.0,1.2)));
-    } else {
-      arr.push(makeHunter(W+40, randi(80,H-80), speed*0.9));
-    }
-    return arr;
-  }
-
-  function makeSabre(x,y,s){ return { kind:'sprite', type:'sabre', img:images.e1, x, y, w:64, h:48, speed:s, passed:false, t:rand(0,Math.PI*2) }; }
-  function makeHunter(x,y,s){
-    return { kind:'sprite', type:'hunter', img:images.e3, x, y, w:64, h:48, speed:s, passed:false,
-             state:'track', timer:0, trackTime:rand(0.6,1.2) };
-  }
-  function makeSpikeWall(x,gapY,gapH,s){
-    const tileW=64, tileH=64;
-    const rects=[];
-    for(let y=0;y<gapY-tileH;y+=tileH) rects.push({x:0,y,w:tileW,h:tileH});
-    for(let y=H-tileH;y>gapY+gapH;y-=tileH) rects.push({x:0,y,w:tileW,h:tileH});
-    return { kind:'spikes', img:images.e2, x, speed:s, rects, scoreX:x+tileW/2, passed:false };
-  }
-
-  function updateEnemy(e, dt){
-    if (e.kind==='spikes'){
-      e.x -= e.speed;
-    } else if (e.type==='sabre'){
-      e.x -= e.speed;
-      e.t += 6*dt;
-      e.y += Math.sin(e.t)*0.8;
-    } else if (e.type==='hunter'){
-      if (e.state==='track'){
-        e.y += (player.y - e.y) * 0.06; // gently track
-        e.timer += dt;
-        e.x -= e.speed;
-        if (e.timer >= e.trackTime){ e.state='dash'; e.speed *= 1.8; }
-      } else { // dash
-        e.x -= e.speed;
+      // eat coin
+      const id = idx(player.x, player.y);
+      if(tiles[id]===1){
+        tiles[id]=2;
+        score++; scoreEl.textContent = "Score: "+score;
       }
     }
+    // move
+    const d = DIRS[player.dir];
+    // prevent entering walls
+    if(atCenter(player.px, player.py)){
+      if(!canMove(player.x, player.y, player.dir)) return; // blocked
+    }
+    player.px += d.x*speed;
+    player.py += d.y*speed;
   }
 
-  function passCheck(e){
-    if (e.kind==='spikes') return e.scoreX < player.x;
-    return (e.x + e.w/2) < (player.x - player.w/2);
+  function optionsAt(x,y,prevDir){
+    const opts=[];
+    for(const d of ['up','down','left','right']){
+      if(d===opposite(prevDir)) continue;
+      const nx=x+DIRS[d].x, ny=y+DIRS[d].y;
+      if(inBounds(nx,ny) && isPath(nx,ny)) opts.push(d);
+    }
+    // if dead-end, allow back
+    if(opts.length===0 && prevDir){ opts.push(prevDir); }
+    return opts;
   }
+  const opposite = (d)=> d==='up'?'down': d==='down'?'up': d==='left'?'right':'left';
 
-  function offscreen(e){
-    if (e.kind==='spikes') return (e.x + 64) < -50;
-    return e.x + e.w/2 < -50;
-  }
+  function stepGhost(g){
+    // choose at intersections
+    if(atCenter(g.px, g.py)){
+      g.x = Math.round(g.px/tile);
+      g.y = Math.round(g.py/tile);
 
-  // ======= Collisions & Draw =======
-  function collides(e){
-    const p = { x: player.x - player.w*HITBOX_SHRINK/2,
-                y: player.y - player.h*HITBOX_SHRINK/2,
-                w: player.w*HITBOX_SHRINK,
-                h: player.h*HITBOX_SHRINK };
-    if (e.kind==='spikes'){
-      for(const r of e.rects){
-        const rr = {
-          x: r.x + e.x - 64,      // tile origin as e.x - 64 margin
-          y: r.y,
-          w: r.w*HITBOX_SHRINK,
-          h: r.h*HITBOX_SHRINK
-        };
-        rr.x += (r.w*(1-HITBOX_SHRINK)/2);
-        rr.y += (r.h*(1-HITBOX_SHRINK)/2);
-        if (aabb(p, rr)) return true;
-      }
-      return false;
-    } else {
-      const r = {
-        x: e.x - e.w*HITBOX_SHRINK/2,
-        y: e.y - e.h*HITBOX_SHRINK/2,
-        w: e.w*HITBOX_SHRINK,
-        h: e.h*HITBOX_SHRINK
+      const opts = optionsAt(g.x, g.y, opposite(g.dir));
+      // very light bias toward the player (cheap chase)
+      const prefer = (dir)=> {
+        const nx=g.x+DIRS[dir].x, ny=g.y+DIRS[dir].y;
+        const dx = Math.sign(player.x - nx), dy = Math.sign(player.y - ny);
+        // prefer directions that reduce manhattan distance
+        if((dir==='left' && dx<0)||(dir==='right' && dx>0)||(dir==='up' && dy<0)||(dir==='down' && dy>0)) return 0.6;
+        return 0.4;
       };
-      return aabb(p,r);
-    }
-  }
-
-  function aabb(a,b){ return !(a.x+a.w<b.x || b.x+b.w<a.x || a.y+a.h<b.y || b.y+b.h<a.y); }
-
-  function draw(){
-    // bg tiling
-    if(images.bg.complete){
-      if(!bg.ready){ bg.tileW = Math.round(images.bg.width * (H / images.bg.height)); bg.tileH = H; bg.ready = true; }
-      let x = - (bg.offset % (bg.tileW||W));
-      while(x < W){ ctx.drawImage(images.bg, 0,0, images.bg.width, images.bg.height, x, 0, bg.tileW||W, bg.tileH); x += (bg.tileW||W); }
-    } else {
-      ctx.clearRect(0,0,W,H);
-    }
-
-    // enemies
-    for(const e of enemies){
-      if (e.kind==='spikes'){
-        for(const r of e.rects){
-          const drawX = r.x + e.x - 64;
-          if(images.e2.complete) ctx.drawImage(images.e2, drawX, r.y, r.w, r.h);
+      if(opts.length>1){
+        // weighted pick
+        let best=opts[0], bestW=-1;
+        for(const d of opts){
+          const w = prefer(d) + Math.random()*0.4;
+          if(w>bestW){ bestW=w; best=d; }
         }
-      } else {
-        if(e.img.complete) ctx.drawImage(e.img, e.x - e.w/2, e.y - e.h/2, e.w, e.h);
+        g.dir = best;
+      }else{
+        g.dir = opts[0];
       }
     }
-
-    // player
-    ctx.save();
-    ctx.translate(player.x, player.y);
-    ctx.rotate(-player.rot * Math.PI/180);
-    if(images.mam.complete) ctx.drawImage(images.mam, -player.w/2, -player.h/2, player.w, player.h);
-    ctx.restore();
-
-    // snow
-    ctx.globalAlpha = 0.9;
-    ctx.fillStyle = '#fff';
-    for(const f of snow){ ctx.fillRect(f.x|0, f.y|0, f.r, f.r); }
-    ctx.globalAlpha = 1;
+    const d = DIRS[g.dir];
+    // wall safety
+    if(atCenter(g.px,g.py)){
+      if(!canMove(g.x,g.y,g.dir)) return;
+    }
+    g.px += d.x*ghostSpeed;
+    g.py += d.y*ghostSpeed;
   }
 
-  function showOver(){ over.style.display = 'flex'; }
-  function hideOver(){ over.style.display = 'none'; }
+  function drawActors(){
+    // Player
+    const pdir = player.dir; 
+    ctx.drawImage(mammoth[pdir], player.px, player.py, tile, tile);
 
-  function gameOver(){
-    running = false;
-    try{ bgm.pause(); }catch{}
-    if (score > best) { best = score; localStorage.setItem('mb_best', best); }
-    bestEl.textContent = best;
-    finalScoreEl.textContent = score;
-    showOver();
+    // Ghosts
+    for(const g of ghosts){
+      ctx.drawImage(hunter[g.dir], g.px, g.py, tile, tile);
+    }
   }
 
-  // ======= Utils =======
-  function flap(){ if(player.alive) player.vy = FLAP_V; }
-  function rand(a,b){ return a + Math.random()*(b-a); }
-  function randi(a,b){ return Math.floor(rand(a,b+1)); }
-  function randMs(a,b){ return Math.floor(rand(a,b)); }
+  function checkCollisions(){
+    for(const g of ghosts){
+      const dx = Math.abs((g.px+tile/2) - (player.px+tile/2));
+      const dy = Math.abs((g.py+tile/2) - (player.py+tile/2));
+      if(dx < tile*0.6 && dy < tile*0.6){
+        lives--;
+        livesEl.textContent = "Lives: "+lives;
+        if(lives<=0){
+          endGame(false);
+        }else{
+          // reset player & send one ghost back to house
+          resetPlayer();
+          g.x=ghostHouse.x; g.y=ghostHouse.y; g.px=g.x*tile; g.py=g.y*tile; g.dir='left';
+        }
+      }
+    }
+  }
+
+  function remainingCoins(){
+    return tiles.some(v=>v===1);
+  }
+
+  let running=true, won=false;
+  function endGame(w){
+    running=false; won=w;
+    setTimeout(()=>{
+      alert((w?"YOU WIN! ":"GAME OVER! ") + "Score: "+score);
+      location.reload();
+    }, 50);
+  }
+
+  // ====== LOOP ======
+  function loop(){
+    if(!running) return;
+    stepPlayer();
+    ghosts.forEach(stepGhost);
+    checkCollisions();
+
+    drawMaze();
+    drawActors();
+
+    if(!remainingCoins()) endGame(true);
+    requestAnimationFrame(loop);
+  }
+
+  // ====== INIT ======
+  // Clear pellets inside the ghost house to avoid instant scoring
+  tiles[idx(ghostHouse.x, ghostHouse.y)] = 2;
+
+  // Kick off
+  resetPlayer();
+  // Try autoplay (may be blocked until user interaction)
+  bgm.play().catch(()=>{});
+  requestAnimationFrame(loop);
   </script>
 </body>
 </html>
